@@ -1,0 +1,169 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using Microsoft.JSInterop
+@using TranscodificaBlazor.Components.Service
+@inject IService FileService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Transcode</PageTitle>
+
+<h1 class="text-center fw-bold text-primary">Transcodifica</h1>
+
+<div class="mb-3">
+    <label for="csvFile" class="form-label">Carica File CSV</label>
+    <InputFile id="csvFile" OnChange="CaricaCsv" accept=".csv" class="form-control" />
+    @if (!string.IsNullOrEmpty(nomeFileCsv))
+    {
+        <small class="text-success">File caricato: @nomeFileCsv</small>
+    }
+    @if (!string.IsNullOrEmpty(erroreCsv))
+    {
+        <small class="text-danger">@erroreCsv</small>
+    }
+</div>
+
+<div class="mb-3">
+    <label for="excelFile" class="form-label">Carica File Excel</label>
+    <InputFile id="excelFile" OnChange="CaricaExcel" accept=".xlsx,.xls" class="form-control" />
+    @if (!string.IsNullOrEmpty(nomeFileExcel))
+    {
+        <small class="text-success">File caricato: @nomeFileExcel</small>
+    }
+    @if (!string.IsNullOrEmpty(erroreExcel))
+    {
+        <small class="text-danger">@erroreExcel</small>
+    }
+</div>
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="AvviaTranscodifica" disabled="@(!PuoTranscodificare())">
+        Avvia Transcodifica
+    </button>
+</div>
+
+@if (isElaborando)
+{
+    <div class="alert alert-info">
+        Elaborazione in corso...
+    </div>
+}
+
+@if (elaborazioneCompletata)
+{
+    <div class="alert alert-success">
+        Transcodifica completata! I file sono pronti per il download:
+    </div>
+    <div class="mb-3">
+        <button class="btn btn-success me-2" @onclick="ScaricaJson">
+            <i class="bi bi-download"></i> Scarica JSON
+        </button>
+        <button class="btn btn-success" @onclick="ScaricaCsv">
+            <i class="bi bi-download"></i> Scarica CSV
+        </button>
+    </div>
+}
+
+@code {
+    private string? nomeFileExcel;
+    private string? nomeFileCsv;
+    private string? erroreExcel;
+    private string? erroreCsv;
+    private Dictionary<string, string>? datiCsv;
+    private IBrowserFile? fileExcel;
+    private bool isElaborando = false;
+    private bool elaborazioneCompletata = false;
+    private string? jsonRisultato;
+    private string? csvRisultato;
+
+    private async Task CaricaExcel(InputFileChangeEventArgs e)
+    {
+        erroreExcel = null;
+        nomeFileExcel = null;
+        fileExcel = null;
+
+        var file = e.File;
+        if (file != null)
+        {
+            var result = FileService.IsValidExcel(file);
+            if (result)
+            {
+                nomeFileExcel = file.Name;
+                fileExcel = file;
+            }
+            else
+            {
+                erroreExcel = "File Excel non valido";
+            }
+        }
+    }
+
+    private async Task CaricaCsv(InputFileChangeEventArgs e)
+    {
+        erroreCsv = null;
+        nomeFileCsv = null;
+
+        var file = e.File;
+        if (file != null)
+        {
+            datiCsv = await FileService.ProcessaFileCsv(file);
+            if (datiCsv != null)
+            {
+                nomeFileCsv = file.Name;
+            }
+            else
+            {
+                erroreCsv = "File CSV non valido";
+            }
+        }
+    }
+
+    private bool PuoTranscodificare()
+    {
+        return !string.IsNullOrEmpty(nomeFileExcel) && 
+               !string.IsNullOrEmpty(nomeFileCsv) && 
+               datiCsv != null &&
+               fileExcel != null &&
+               !isElaborando;
+    }
+
+    private async Task AvviaTranscodifica()
+    {
+        isElaborando = true;
+        elaborazioneCompletata = false;
+
+        try
+        {
+            (string json, string csv) = await FileService.TranscodificaAsync(datiCsv!, fileExcel!);
+
+            jsonRisultato = json;
+            csvRisultato = csv;
+            elaborazioneCompletata = true;
+        }
+        catch (Exception ex)
+        {
+            erroreExcel = $"Errore durante la transcodifica: {ex.Message}";
+        }
+        finally
+        {
+            isElaborando = false;
+        }
+    }
+
+    private async Task ScaricaJson()
+    {
+        if (string.IsNullOrEmpty(jsonRisultato)) return;
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(jsonRisultato);
+        var base64 = Convert.ToBase64String(bytes);
+        await JSRuntime.InvokeVoidAsync("downloadFile", "risultato.json", base64);
+    }
+
+    private async Task ScaricaCsv()
+    {
+        if (string.IsNullOrEmpty(csvRisultato)) return;
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(csvRisultato);
+        var base64 = Convert.ToBase64String(bytes);
+        await JSRuntime.InvokeVoidAsync("downloadFile", "risultato.csv", base64);
+    }
+}
